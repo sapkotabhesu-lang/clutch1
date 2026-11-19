@@ -1,0 +1,601 @@
+
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>3D Clutch Animation - Fixed</title>
+
+<style>
+body {
+  margin: 0;
+  overflow: hidden;
+  font-family: Arial, sans-serif;
+  background: #111;
+}
+
+#ui {
+  position: absolute;
+  top: 12px;
+  left: 12px;
+  color: white;
+  background: rgba(0,0,0,0.85);
+  padding: 14px;
+  border-radius: 10px;
+  width: 275px;
+  z-index: 2;
+  line-height: 1.6;
+  box-sizing: border-box;
+}
+
+#ui input {
+  width: 100%;
+  cursor: pointer;
+}
+
+#ui small {
+  color: #ccc;
+}
+
+#reset {
+  width: 100%;
+  padding: 8px;
+  margin-top: 8px;
+  cursor: pointer;
+}
+</style>
+
+<script type="importmap">
+{
+  "imports": {
+    "three": "https://unpkg.com/three@0.160.0/build/three.module.js",
+    "three/addons/": "https://unpkg.com/three@0.160.0/examples/jsm/"
+  }
+}
+</script>
+</head>
+
+<body>
+
+<div id="ui">
+  <b>3D AUTOMOBILE CLUTCH</b>
+  <hr>
+
+  Clutch pedal:
+  <span id="state">Engaged</span>
+
+  <input id="pedal" type="range"
+         min="0" max="1" step="0.01" value="0">
+
+  <small>
+    0 = Pedal released<br>
+    1 = Pedal fully pressed<br>
+    Hold SPACE to press the pedal.
+  </small>
+
+  <hr>
+
+  Flywheel RPM: <span id="fw">115</span><br>
+  Input shaft RPM: <span id="sh">0</span><br>
+  Clutch engagement: <span id="grip">100%</span><br>
+
+  <hr>
+
+  <small>
+    <b>Component colours:</b><br>
+    <span style="color:orange">●</span> Flywheel<br>
+    <span style="color:#a66b3f">●</span> Clutch disc<br>
+    <span style="color:silver">●</span> Pressure plate<br>
+    <span style="color:#398cff">●</span> Springs<br>
+    <span style="color:#22cc66">●</span> Release bearing<br>
+    <span style="color:grey">●</span> Input shaft
+  </small>
+
+  <button id="reset">Reset clutch</button>
+</div>
+
+<script type="module">
+
+import * as THREE from 'three';
+import { OrbitControls } from
+'three/addons/controls/OrbitControls.js';
+
+// ---------------- SCENE ----------------
+
+const scene = new THREE.Scene();
+scene.background = new THREE.Color(0x1b1f27);
+
+const camera = new THREE.PerspectiveCamera(
+  45, window.innerWidth / window.innerHeight, 0.1, 100
+);
+
+camera.position.set(4, 3, 4);
+
+const renderer = new THREE.WebGLRenderer({
+  antialias: true
+});
+
+renderer.setSize(window.innerWidth, window.innerHeight);
+renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+renderer.shadowMap.enabled = true;
+renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+renderer.outputColorSpace = THREE.SRGBColorSpace;
+
+document.body.appendChild(renderer.domElement);
+
+// Camera controls
+
+const controls = new OrbitControls(camera, renderer.domElement);
+controls.target.set(0, 0, 0.55);
+controls.enableDamping = true;
+controls.dampingFactor = 0.06;
+
+// ---------------- LIGHTING ----------------
+
+scene.add(new THREE.AmbientLight(0xffffff, 1.0));
+
+const light = new THREE.DirectionalLight(0xffffff, 2);
+light.position.set(5, 8, 5);
+light.castShadow = true;
+scene.add(light);
+
+const fillLight = new THREE.PointLight(0x6699ff, 35);
+fillLight.position.set(-4, 2, 3);
+scene.add(fillLight);
+
+// ---------------- MATERIALS ----------------
+
+function material(color, extra = {}) {
+  return new THREE.MeshStandardMaterial({
+    color,
+    metalness: 0.55,
+    roughness: 0.4,
+    ...extra
+  });
+}
+
+const orange = material(0xff8c00);
+const brown = material(0x8b542e);
+const silver = material(0xc0c0c0);
+const grey = material(0x777777);
+const blue = material(0x398cff);
+const green = material(0x22cc66);
+const dark = material(0x333333);
+
+// ---------------- CYLINDER HELPER ----------------
+
+// All cylinders have their axis along Z.
+
+function zCylinder(radius, length, mat) {
+  const group = new THREE.Group();
+
+  const mesh = new THREE.Mesh(
+    new THREE.CylinderGeometry(
+      radius, radius, length, 64
+    ),
+    mat
+  );
+
+  mesh.rotation.x = Math.PI / 2;
+  mesh.castShadow = true;
+  mesh.receiveShadow = true;
+
+  group.add(mesh);
+  return group;
+}
+
+// ---------------- ROTATION MARKER ----------------
+
+function marker(parent, radius, color = 0xffffff) {
+  const mesh = new THREE.Mesh(
+    new THREE.BoxGeometry(0.12, radius * 0.65, 0.045),
+    material(color)
+  );
+
+  mesh.position.set(0, radius * 0.65, 0);
+  parent.add(mesh);
+}
+
+// ---------------- FLYWHEEL ----------------
+
+const flywheel = zCylinder(1.5, 0.35, orange);
+flywheel.position.z = 0;
+
+marker(flywheel, 1.5, 0xffffff);
+scene.add(flywheel);
+
+// Flywheel centre hub
+
+const flywheelHub = zCylinder(0.35, 0.45, grey);
+scene.add(flywheelHub);
+
+// ---------------- CRANKSHAFT ----------------
+
+const crank = zCylinder(0.22, 1.2, grey);
+crank.position.z = -0.75;
+scene.add(crank);
+
+// ---------------- CLUTCH DISC ----------------
+
+const disc = new THREE.Group();
+
+// Main friction disc
+
+const discBody = zCylinder(1.22, 0.09, dark);
+disc.add(discBody);
+
+// Friction rings
+
+function frictionRing(z) {
+  const ring = new THREE.Mesh(
+    new THREE.TorusGeometry(1.08, 0.09, 12, 64),
+    brown
+  );
+
+  ring.position.z = z;
+  disc.add(ring);
+}
+
+frictionRing(-0.055);
+frictionRing(0.055);
+
+// Central hub
+
+const hub = zCylinder(0.28, 0.34, silver);
+disc.add(hub);
+
+marker(disc, 1.25, 0xffff00);
+
+disc.position.z = 0.24;
+scene.add(disc);
+
+// ---------------- INPUT SHAFT ----------------
+
+const shaft = zCylinder(0.17, 4.0, silver);
+shaft.position.z = 2.0;
+
+marker(shaft, 0.17, 0x222222);
+scene.add(shaft);
+
+// ---------------- PRESSURE PLATE ----------------
+
+const pressure = zCylinder(1.32, 0.24, silver);
+
+pressure.position.z = 0.43;
+
+marker(pressure, 1.32, 0x222222);
+scene.add(pressure);
+
+// ---------------- CLUTCH COVER ----------------
+
+const cover = zCylinder(
+  1.5,
+  0.08,
+  material(0x555555, {
+    transparent: true,
+    opacity: 0.55
+  })
+);
+
+cover.position.z = 0.95;
+scene.add(cover);
+
+// ---------------- COVER BOLTS ----------------
+
+const bolts = new THREE.Group();
+
+for (let i = 0; i < 8; i++) {
+
+  const angle = i * Math.PI / 4;
+
+  const bolt = new THREE.Mesh(
+    new THREE.CylinderGeometry(0.055, 0.055, 0.07, 12),
+    silver
+  );
+
+  bolt.rotation.x = Math.PI / 2;
+
+  bolt.position.set(
+    Math.cos(angle) * 1.35,
+    Math.sin(angle) * 1.35,
+    0.95
+  );
+
+  bolts.add(bolt);
+}
+
+scene.add(bolts);
+
+// ---------------- CLUTCH SPRINGS ----------------
+
+// Helical compression springs.
+
+function createSpring() {
+
+  const points = [];
+
+  const turns = 7;
+  const radius = 0.075;
+  const segments = 160;
+
+  for (let i = 0; i <= segments; i++) {
+
+    const t = i / segments;
+    const angle = t * turns * Math.PI * 2;
+
+    points.push(
+      new THREE.Vector3(
+        radius * Math.cos(angle),
+        radius * Math.sin(angle),
+        t - 0.5
+      )
+    );
+  }
+
+  const curve = new THREE.CatmullRomCurve3(points);
+
+  const geometry = new THREE.TubeGeometry(
+    curve, segments, 0.018, 8, false
+  );
+
+  return new THREE.Mesh(geometry, blue);
+}
+
+const springs = [];
+const springGroup = new THREE.Group();
+
+for (let i = 0; i < 6; i++) {
+
+  const angle = i * Math.PI / 3;
+
+  const spring = new THREE.Group();
+  spring.add(createSpring());
+
+  spring.position.set(
+    Math.cos(angle) * 0.95,
+    Math.sin(angle) * 0.95,
+    0
+  );
+
+  springGroup.add(spring);
+  springs.push(spring);
+}
+
+scene.add(springGroup);
+
+// ---------------- RELEASE BEARING ----------------
+
+const bearing = zCylinder(0.34, 0.15, green);
+scene.add(bearing);
+
+// Bearing inner sleeve
+
+const bearingSleeve = zCylinder(0.20, 0.18, silver);
+scene.add(bearingSleeve);
+
+// ---------------- RELEASE FORK ----------------
+
+const fork = new THREE.Group();
+
+const forkArm = new THREE.Mesh(
+  new THREE.BoxGeometry(0.12, 1.5, 0.12),
+  green
+);
+
+fork.add(forkArm);
+scene.add(fork);
+
+// ---------------- FLOOR / REFERENCE ----------------
+
+const grid = new THREE.GridHelper(8, 20, 0x555555, 0x333333);
+grid.rotation.x = Math.PI / 2;
+grid.position.z = -1.5;
+scene.add(grid);
+
+// ---------------- ANIMATION STATE ----------------
+
+const pedalEl = document.getElementById('pedal');
+
+let spacePressed = false;
+
+let pedalPosition = 0;
+let shaftSpeed = 0;
+
+let fwAngle = 0;
+let discAngle = 0;
+
+const ENGINE_SPEED = 12; // radians per second
+
+const clock = new THREE.Clock();
+
+// ---------------- KEYBOARD CONTROL ----------------
+
+window.addEventListener('keydown', (event) => {
+
+  if (event.code === 'Space') {
+    event.preventDefault();
+    spacePressed = true;
+  }
+
+});
+
+window.addEventListener('keyup', (event) => {
+
+  if (event.code === 'Space') {
+    spacePressed = false;
+  }
+
+});
+
+window.addEventListener('blur', () => {
+  spacePressed = false;
+});
+
+// ---------------- RESET ----------------
+
+document.getElementById('reset').addEventListener('click', () => {
+
+  spacePressed = false;
+  pedalEl.value = 0;
+
+  pedalPosition = 0;
+  shaftSpeed = ENGINE_SPEED;
+});
+
+// ---------------- MAIN ANIMATION ----------------
+
+function animate() {
+
+  requestAnimationFrame(animate);
+
+  const dt = Math.min(clock.getDelta(), 0.04);
+
+  // Pedal input
+
+  const target = spacePressed
+    ? 1
+    : Number(pedalEl.value);
+
+  pedalPosition +=
+    (target - pedalPosition) * Math.min(1, dt * 8);
+
+  // ---------------- AXIAL MOVEMENT ----------------
+
+  // Clutch disc stays in its operating position.
+  // Pressure plate moves away from the friction disc.
+
+  const discZ = 0.24;
+
+  const pressureZ = 0.43 + 0.22 * pedalPosition;
+
+  disc.position.z = discZ;
+  pressure.position.z = pressureZ;
+
+  // ---------------- CLUTCH GRIP ----------------
+
+  const grip = Math.max(
+    0,
+    1 - pedalPosition * 1.6
+  );
+
+  // Engine speed
+
+  const fwSpeed = ENGINE_SPEED;
+
+  // Shaft accelerates when clutch is engaged.
+
+  shaftSpeed +=
+    (fwSpeed - shaftSpeed) *
+    grip * Math.min(1, dt * 6);
+
+  // Shaft gradually slows when disconnected.
+
+  shaftSpeed *=
+    (1 - (1 - grip) * Math.min(1, dt * 0.8));
+
+  // ---------------- ROTATION ----------------
+
+  fwAngle += fwSpeed * dt;
+  discAngle += shaftSpeed * dt;
+
+  flywheel.rotation.z = fwAngle;
+  crank.rotation.z = fwAngle;
+  flywheelHub.rotation.z = fwAngle;
+
+  cover.rotation.z = fwAngle;
+  bolts.rotation.z = fwAngle;
+  pressure.rotation.z = fwAngle;
+  springGroup.rotation.z = fwAngle;
+
+  disc.rotation.z = discAngle;
+  shaft.rotation.z = discAngle;
+
+  // ---------------- SPRING MOVEMENT ----------------
+
+  const coverBottom = 0.91;
+  const pressureTop = pressureZ + 0.12;
+
+  const springLength = Math.max(
+    0.05,
+    coverBottom - pressureTop
+  );
+
+  springs.forEach((spring) => {
+
+    spring.scale.z = springLength;
+
+  });
+
+  springGroup.position.z =
+    (coverBottom + pressureTop) / 2;
+
+  // ---------------- RELEASE BEARING ----------------
+
+  const bearingZ = 1.25 - 0.30 * pedalPosition;
+
+  bearing.position.z = bearingZ;
+  bearingSleeve.position.z = bearingZ;
+
+  fork.position.set(
+    0,
+    -0.85,
+    bearingZ + 0.12
+  );
+
+  fork.rotation.x = -0.25 * pedalPosition;
+
+  // ---------------- DISPLAY ----------------
+
+  const stateElement = document.getElementById('state');
+
+  if (pedalPosition < 0.1) {
+
+    stateElement.textContent = 'Engaged';
+
+  } else if (pedalPosition > 0.9) {
+
+    stateElement.textContent = 'Disengaged';
+
+  } else {
+
+    stateElement.textContent = 'Slipping';
+
+  }
+
+  document.getElementById('fw').textContent =
+    Math.round(fwSpeed * 60 / (2 * Math.PI));
+
+  document.getElementById('sh').textContent =
+    Math.round(shaftSpeed * 60 / (2 * Math.PI));
+
+  document.getElementById('grip').textContent =
+    Math.round(grip * 100) + '%';
+
+  // ---------------- RENDER ----------------
+
+  controls.update();
+
+  renderer.render(scene, camera);
+}
+
+animate();
+
+// ---------------- WINDOW RESIZE ----------------
+
+window.addEventListener('resize', () => {
+
+  camera.aspect =
+    window.innerWidth / window.innerHeight;
+
+  camera.updateProjectionMatrix();
+
+  renderer.setSize(
+    window.innerWidth,
+    window.innerHeight
+  );
+
+});
+
+</script>
+</body>
+</html>
